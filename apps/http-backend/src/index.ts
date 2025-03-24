@@ -7,25 +7,38 @@ import {
   CreateUserSchema,
   SigninSchema,
 } from "@repo/common/types";
+import { prismaClient } from "@repo/db/client";
 
 const app = express();
 
 app.use(express.json());
 
-app.post("/signup", (req, res) => {
-  const data = CreateUserSchema.safeParse(req.body);
-  if (!data.success) {
-    res.json({
-      message: "incorrect inputs",
-    });
-    return;
-  }
-  // db call to create user
+app.post("/signup", async (req, res) => {
+  try {
+    const data = CreateUserSchema.safeParse(req.body);
+    if (!data.success) {
+      res.json({
+        message: "incorrect inputs",
+      });
+      return;
+    }
 
-  res.status(201).json({ userId: 123 });
+    const user = await prismaClient.user.create({
+      data: {
+        name: req.body.name,
+        email: req.body.email,
+        password: req.body.password,
+      },
+    });
+
+    res.json({ userId: user.id });
+  } catch (error) {
+    console.log("[CREATE USER ERROR]", error);
+    throw new Error("failed to create user");
+  }
 });
 
-app.post("/login", (req, res) => {
+app.post("/login", async (req, res) => {
   const data = SigninSchema.safeParse(req.body);
   if (!data.success) {
     res.json({
@@ -34,18 +47,37 @@ app.post("/login", (req, res) => {
     return;
   }
 
-  const userId = 1;
+  const user = await prismaClient.user.findUnique({
+    where: {
+      email: req.body.email,
+    },
+  });
+
+  if (!user) {
+    res.json({
+      message: "user doesn't exist",
+    });
+    return;
+  }
+
+  if (user.password !== req.body.password) {
+    res.json({
+      message: "Invalid credentials",
+    });
+    return;
+  }
+
   const token = jwt.sign(
     {
-      userId,
+      id: user.id,
     },
     JWT_SECRET
   );
 
-  res.status(200).send("User logged in");
+  res.status(200).send({ token });
 });
 
-app.post("/room", middleware, (req, res) => {
+app.post("/room", middleware, async (req, res) => {
   const data = CreateRoomSchema.safeParse(req.body);
   if (!data.success) {
     res.json({
@@ -54,7 +86,19 @@ app.post("/room", middleware, (req, res) => {
     return;
   }
 
-  res.status(201).send("Room created");
+  try {
+    const room = await prismaClient.room.create({
+      data: {
+        slug: req.body.name,
+        // @ts-ignore
+        adminId: req.userId,
+      },
+    });
+    res.send({ roomId: room.id });
+  } catch (error) {
+    console.log("[CREATE ROOM ERROR]", error);
+    throw new Error("failed to create room");
+  }
 });
 
 app.listen(3001);
